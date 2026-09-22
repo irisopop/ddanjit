@@ -97,6 +97,10 @@ const SNDBTN={x:966,y:52,r:46};
 // ───────── 게임 상태 ─────────
 const CLASS_SEC=80, HOLD_PER=3.2, SLOTS=12;
 let G=null; let mode='title'; let best=null; try{ best=JSON.parse(localStorage.getItem('ddanjit_best')||'null'); }catch(e){}
+let recs=[]; try{ recs=JSON.parse(localStorage.getItem('ddanjit_recs')||'[]'); }catch(e){}
+let plays=0; try{ plays=parseInt(localStorage.getItem('ddanjit_plays')||'0',10)||0; }catch(e){}
+function saveRec(r){ recs.push(r); recs.sort((a,b)=> b.n-a.n || a.s-b.s || a.ts-b.ts); recs=recs.slice(0,20); plays++;
+  try{ localStorage.setItem('ddanjit_recs',JSON.stringify(recs)); localStorage.setItem('ddanjit_plays',String(plays)); }catch(e){} }
 let holding=false, pressAt=0, releaseAt=-9;
 function newGame(){ const n=SPR.doodles.length||16; const pool=[...Array(n).keys()]; const slots=[]; for(let i=0;i<SLOTS;i++){ const k=Math.floor(Math.random()*pool.length); slots.push({d:pool.splice(k,1)[0],rot:rnd(-0.1,0.1)}); }
   G={ time:0, minute:0, bored:0.15, hold:0, strikes:0, nearMiss:0, slots, teacher:{state:'WRITE',t:0,dur:rnd(4.5,6.5)}, kid:{state:'ok',t:0}, msgs:[], tmsg:null, over:false, phoneDone:false, ended:false, shake:0, chalkProj:null, questioned:false, grade:null, tutorial:3.4, chalkN:0, chalkHold:0, stuPhase:[0,1,2,3,4].map(()=>rnd(0,TAU)), stuSpeed:[0,1,2,3,4].map(()=>rnd(2.2,3.6)) }; mode='play'; kidSay(L('bored'),2.2); }
@@ -120,6 +124,7 @@ function strike(reason){ const T=G.teacher; G.strikes++; G.shake=0.5; holding=fa
 function endGame(){ if(G.ended) return; G.ended=true; scratch(false); if(!G.over){ SFX.bell(); teacherSay(TEACH.bell,3); }
   const n=Math.floor(G.hold/HOLD_PER); let g; if(G.over) g='g4'; else if(G.strikes===0) g=n>=10?'g1':'g2'; else g='g3'; G.grade=g;
   const rank={g1:4,g2:3,g3:2,g4:1}[g]; if(!best||rank>best.rank||(rank===best.rank&&n>best.n)){ best={rank,n,g}; try{ localStorage.setItem('ddanjit_best',JSON.stringify(best)); }catch(e){} }
+  const rec={n,g,s:G.strikes,ts:Date.now()}; saveRec(rec); G.rank=recs.findIndex(x=>x.ts===rec.ts)+1; G.plays=plays;
   setTimeout(()=>{ if(G&&G.ended) mode='result'; }, G.over?2600:1800); }
 // ───────── 입력 ─────────
 function toXY(e){ const r=cv.getBoundingClientRect(); return [(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H]; }
@@ -178,13 +183,13 @@ function drawBoardText(){ if(!G) return; let left=G.chalkN; ctx.save(); ctx.glob
     txt(s,BOARD.x,BOARD.y+i*45,{size:i<2?36:34,align:'left',col:C.chalk,font:FONT_PEN,weight:400,rot:-0.014}); }
   ctx.restore(); }
 function teacherSprite(){ const T=G.teacher; const g=gaze(); if(T.state==='CAUGHT') return 3; if(T.state==='PHONE') return 4; if(g==='look') return 2; if(g==='turn') return 1; return 0; }
-function tFront(){ const T=G.teacher; return T.state==='PATROL'&&T.t/T.dur>0.22; }
-function drawTeacher(){ const T=G.teacher; let x=TPOS.x, baseY=TPOS.y, hgt=TPOS.h; if(T.state==='PATROL'){ const p=T.t/T.dur, k=Math.sin(p*Math.PI); x=TPOS.x-k*150; baseY=TPOS.y+k*430; hgt=TPOS.h*(1+k*1.05); }
+function tFront(){ return G.teacher.state==='PATROL'; }
+function drawTeacher(){ const T=G.teacher; let x=TPOS.x, baseY=TPOS.y, hgt=TPOS.h, al=1; if(T.state==='PATROL'){ const p=T.t/T.dur, k=Math.sin(p*Math.PI); x=TPOS.x-k*160; baseY=FG_DY+70+k*400; hgt=TPOS.h*(0.92+k*1.1); al=clamp(k*3.2,0,1); }
   if(T.state==='WRITE'&&!reduce){ x+=Math.sin(T0/150)*7; baseY+=Math.sin(T0/95)*2.5; }
-  if(T.state==='PATROL'&&gaze()==='look'){ ctx.save(); ctx.globalAlpha=.15; ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(x,baseY,hgt*0.45,hgt*0.08,0,0,TAU); ctx.fill(); ctx.restore(); }
-  if(!spr(SPR.teacher[teacherSprite()],x,baseY,hgt*0.95,hgt,'bc')){ circ(x,baseY-hgt*0.75,hgt*0.14,{w:6}); pline([[x-hgt*0.15,baseY-hgt*0.6],[x+hgt*0.15,baseY-hgt*0.6],[x+hgt*0.2,baseY],[x-hgt*0.2,baseY]],{w:6,close:true}); }
+  if(T.state==='PATROL'&&gaze()==='look'){ ctx.save(); ctx.globalAlpha=.15*al; ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(x,baseY,hgt*0.45,hgt*0.08,0,0,TAU); ctx.fill(); ctx.restore(); }
+  if(!spr(SPR.teacher[teacherSprite()],x,baseY,hgt*0.95,hgt,'bc','source-over',al)){ circ(x,baseY-hgt*0.75,hgt*0.14,{w:6}); pline([[x-hgt*0.15,baseY-hgt*0.6],[x+hgt*0.15,baseY-hgt*0.6],[x+hgt*0.2,baseY],[x-hgt*0.2,baseY]],{w:6,close:true}); }
   if(G.chalkProj){ const p=G.chalkProj.t/0.5; const px=lerp(x,300,p), py=lerp(baseY-hgt*0.55,1500,p*p); pline([[px,py],[px+10,py+14]],{w:10,col:C.chalk}); pline([[px,py],[px+10,py+14]],{w:2,col:C.ink}); }
-  return {x,baseY,hgt}; }
+  return {x,baseY,hgt,al}; }
 function drawGaze(){ const g=G.ended?'safe':gaze(); const cfg={ safe:{col:C.green,label:'안 봄 · 지금 그려',icon:'closed'}, turn:{col:'#E0A020',label:'돈다!! 손 떼',icon:'half'}, look:{col:C.red,label:'보는 중!! 손 떼',icon:'open'}, phone:{col:C.blue,label:'쌤 폰 봄 · 마음껏 (x2)',icon:'closed'} }[g];
   const y=1000; ctx.save(); ctx.fillStyle=cfg.col; ctx.globalAlpha=(g==='look'&&!reduce)?0.85+Math.sin(T0/90)*0.15:0.92; roundRect(200,y-40,680,80,40); ctx.fill(); ctx.restore();
   const ex=270; if(cfg.icon==='open'){ pline(circPts(ex,y,34,20,20),{w:5,col:C.paper,close:true}); ctx.save(); ctx.fillStyle=C.paper; ctx.beginPath(); ctx.arc(ex,y,9,0,TAU); ctx.fill(); ctx.restore(); }
@@ -241,13 +246,13 @@ function drawTitle(){ drawPaper(); txt('딴짓',540,320,{size:290,rot:-0.06}); t
   txt('꾹 누르면 낙서 · 손 떼면 공부하는 척',540,1035,{size:44,weight:400}); txt('3번 걸리면 엄마 소환 · 너무 심심하면 잠듦',540,1090,{size:40,weight:400,col:C.gray});
   spr(SPR.kid[0],540,1310,220,180,'bc');
   button(BTN.start,'시작 (꾹!)',C.yellow); button(BTN.mild,`순한맛(엄마 모드): ${mild?'켜짐':'꺼짐'}`,C.paper2,38);
-  if(best){ txt(`최고 기록: ${L(best.g)} · 낙서 ${best.n}개`,540,1670,{size:40,weight:400,col:C.gray}); }
-  txt('수업 40분 = 80초',540,1780,{size:34,weight:400,col:C.gray}); if(toLoad&&loaded<toLoad) txt(`그림 준비 중 ${loaded}/${toLoad}`,540,1840,{size:30,weight:400,col:C.gray}); drawSndBtn(); }
+  if(recs.length){ txt('내 기록',540,1636,{size:40}); recs.slice(0,3).forEach((r,i)=>{ txt(`${i+1}위`,388,1690+i*46,{size:36,align:'left',col:i?C.gray:C.red,weight:400}); txt(`낙서 ${r.n}개 · ${L(r.g)}`,468,1690+i*46,{size:36,align:'left',weight:400,col:i?C.gray:C.ink}); }); }
+  else txt('수업 40분 = 80초',540,1690,{size:36,weight:400,col:C.gray}); if(toLoad&&loaded<toLoad) txt(`그림 준비 중 ${loaded}/${toLoad}`,540,1840,{size:30,weight:400,col:C.gray}); drawSndBtn(); }
 function drawResult(){ drawPaper(); const over=G.over; txt(over?'노트 압수':'쉬는시간!!',540,140,{size:106,rot:-0.03,col:over?C.red:C.ink});
   ctx.save(); ctx.translate(0,-790); drawNotebook(); ctx.restore();
   if(over){ pline([[170,280],[930,790]],{w:26,col:C.red,alpha:.8}); pline([[930,280],[170,790]],{w:26,col:C.red,alpha:.8}); }
   const g=L(G.grade); ctx.save(); ctx.translate(810,1040); ctx.rotate(-0.2); circ(0,0,148,{w:9,col:C.red,alpha:.85,n:32}); circ(0,0,126,{w:4,col:C.red,alpha:.85,n:32}); txt(g,0,-10,{size:g.length>4?58:74,col:C.red,alpha:.9}); txt('딴짓 성적표',0,50,{size:32,col:C.red,weight:400,alpha:.85}); ctx.restore();
-  const n=Math.floor(G.hold/HOLD_PER); txt(`낙서 ${n}개`,300,975,{size:60}); txt(`걸림 ${G.strikes}번 · 아슬 ${G.nearMiss}번`,300,1045,{size:42,weight:400}); if(best) txt(`최고: ${L(best.g)} · ${best.n}개`,300,1105,{size:36,weight:400,col:C.gray});
+  const n=Math.floor(G.hold/HOLD_PER); txt(`낙서 ${n}개`,300,975,{size:60}); txt(`걸림 ${G.strikes}번 · 아슬 ${G.nearMiss}번`,300,1045,{size:42,weight:400}); txt(G.rank? `내 기록 ${G.rank}위 / ${G.plays}판째` : '',300,1105,{size:38,weight:400,col:G.rank===1?C.red:C.gray});
   spr(SPR.kid[over?3:0],540,1580,330,310,'bc'); bubble(540,1240,over?L('over'):(G.strikes===0?'쌤 개무능 ㅋㅋ':'다음엔 안 걸림'),{size:44});
   button(BTN.again,'다시 하기',C.paper2,48); button(BTN.share,'자랑하기',C.yellow,48); drawSndBtn(); }
 function frame(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; T0=now; seed=Math.floor(now/125); update(dt);
