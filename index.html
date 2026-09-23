@@ -147,8 +147,11 @@ async function fetchBoard(){ const r=await fetch(DB+'/scores.json?orderBy=%22n%2
 async function submitScore(){ if(!G||!G.ended||!G.recOnline||!nick) return; const g=G.recOnline; if(g.state==='sending'||g.state==='done') return; g.state='sending';
   try{ const r=await fetch(DB+'/scores.json',{method:'POST',body:JSON.stringify({name:nick,n:g.n,s:g.s,g:g.g,ts:{'.sv':'timestamp'}})}); if(!r.ok) throw new Error(r.status); const {name:key}=await r.json();
     g.key=key; myKeys.push(key); myKeys=myKeys.slice(-50); try{ localStorage.setItem('ddanjit_keys',JSON.stringify(myKeys)); }catch(e){}
-    const list=await fetchBoard(); g.rank=list.findIndex(x=>x.k===key)+1; g.total=list.length; g.state='done'; g.doneAt=performance.now(); }
+    const list=await fetchBoard(); g.rank=list.findIndex(x=>x.k===key)+1; g.total=list.length; g.state='done'; g.doneAt=performance.now(); titleTop=list.slice(0,3); titleTotal=list.length; }
   catch(e){ g.state='err'; } }
+let titleTop=null, titleTotal=0, titleAt=0;
+async function loadTitleTop(){ titleAt=performance.now(); try{ const list=await fetchBoard(); titleTop=list.slice(0,3); titleTotal=list.length; }catch(e){ if(!titleTop) titleTop=[]; } }
+loadTitleTop();
 const lbEl=document.getElementById('lb'), lbList=document.getElementById('lbList'), lbForm=document.getElementById('lbForm'), lbName=document.getElementById('lbName');
 function lbMsg(t){ lbList.textContent=''; const li=document.createElement('li'); li.className='msg'; li.textContent=t; lbList.appendChild(li); }
 async function openBoard(withForm){ lbEl.hidden=false; lbForm.hidden=!withForm; if(withForm){ lbName.value=nick; setTimeout(()=>lbName.focus(),50); }
@@ -193,11 +196,11 @@ function endGame(){ if(G.ended) return; G.ended=true; scratch(false); if(!G.over
   setTimeout(()=>{ if(G&&G.ended){ mode='result'; RES_T=performance.now(); resFx={tick:-1,stamp:false}; } }, G.over?2800:1900); }
 // ───────── 입력 ─────────
 function toXY(e){ const r=cv.getBoundingClientRect(); return [(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H]; }
-const BTN={ start:{x:290,y:1330,w:500,h:130}, mild:{x:290,y:1500,w:500,h:96}, again:{x:90,y:1690,w:560,h:150}, share:{x:680,y:1690,w:310,h:150}, rank:{x:90,y:1440,w:900,h:120}, board:{x:290,y:1795,w:500,h:86} };
+const BTN={ start:{x:290,y:1330,w:500,h:130}, mild:{x:290,y:1500,w:500,h:96}, again:{x:90,y:1690,w:560,h:150}, share:{x:680,y:1690,w:310,h:150}, rank:{x:90,y:1440,w:900,h:120}, board:{x:290,y:1812,w:500,h:84} };
 const hit=(x,y,b)=>x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h;
 function onPress(x,y){ const a=audio(); if(a&&a.state==='suspended') a.resume();
   if(Math.hypot(x-SNDBTN.x,y-SNDBTN.y)<SNDBTN.r+14){ setSnd(!sndOn); if(sndOn) SFX.ok(); return; }
-  if(mode==='title'){ if(hit(x,y,BTN.start)) { newGame(); SFX.page(); return; } if(plays>0&&hit(x,y,BTN.board)){ openBoard(false); SFX.ok(); return; } if(hit(x,y,BTN.mild)){ mild=!mild; try{ localStorage.setItem('ddanjit_mild',mild?'1':'0'); }catch(e){} SFX.ok(); } return; }
+  if(mode==='title'){ if(hit(x,y,BTN.start)) { newGame(); SFX.page(); return; } if(hit(x,y,BTN.board)){ openBoard(false); SFX.ok(); return; } if(hit(x,y,BTN.mild)){ mild=!mild; try{ localStorage.setItem('ddanjit_mild',mild?'1':'0'); }catch(e){} SFX.ok(); } return; }
   if(mode==='result'){ if(hit(x,y,BTN.again)){ newGame(); SFX.page(); return; } if(hit(x,y,BTN.share)){ share(); return; } if(hit(x,y,BTN.rank)){ const g=G.recOnline; SFX.ok(); if(!nick) openBoard(true); else if(g&&g.state==='err'){ g.state='idle'; submitScore(); } else openBoard(false); } return; }
   if(!G||G.ended) return; const T=G.teacher; pressAt=G.time; G.tutorial=Math.min(G.tutorial,0.6);
   if(T.state==='CAUGHT'||T.state==='STAND') return;
@@ -399,8 +402,12 @@ function drawTitle(){ drawPaper(); txt('딴짓',540,320,{size:290,rot:-0.06}); t
   txt('꾹 누르면 낙서 · 손 떼면 공부하는 척',540,1035,{size:44,weight:400}); txt('3번 걸리면 엄마 소환 · 너무 심심하면 잠듦',540,1090,{size:40,weight:400,col:C.gray});
   spr(SPR.kid[0],540,1310,220,180,'bc');
   button(BTN.start,'시작 (꾹!)',C.yellow); button(BTN.mild,`순한맛(엄마 모드): ${mild?'켜짐':'꺼짐'}`,C.paper2,38);
-  if(recs.length){ txt('내 기록',540,1636,{size:40}); recs.slice(0,3).forEach((r,i)=>{ txt(`${i+1}위`,388,1690+i*46,{size:36,align:'left',col:i?C.gray:C.red,weight:400}); txt(`낙서 ${r.n}개 · ${L(r.g)}`,468,1690+i*46,{size:36,align:'left',weight:400,col:i?C.gray:C.ink}); }); }
-  else txt('수업 40분 = 80초',540,1690,{size:36,weight:400,col:C.gray}); if(plays>0) button(BTN.board,'🏆 전체 랭킹',C.paper2,40); else txt('한 판 하면 전체 랭킹이 열려요',540,BTN.board.y+BTN.board.h/2+14,{size:36,weight:400,col:C.gray}); if(toLoad&&loaded<toLoad) txt(`그림 준비 중 ${loaded}/${toLoad}`,540,1900,{size:30,weight:400,col:C.gray}); drawSndBtn(); }
+  if(performance.now()-titleAt>60000) loadTitleTop();
+  txt(titleTotal?`🏆 전체 랭킹 TOP 3 · ${titleTotal}명`:'🏆 전체 랭킹',540,1628,{size:38});
+  if(titleTop===null) txt('불러오는 중…',540,1700,{size:34,weight:400,col:C.gray});
+  else if(!titleTop.length) txt('아직 아무도 없음 · 1등 기회!',540,1700,{size:36,weight:400,col:C.gray});
+  else titleTop.forEach((r,i)=>{ const y=1680+i*40, col=i?C.gray:C.red; txt(`${i+1}위`,300,y,{size:34,align:'left',col,weight:400}); txt(String(r.name).slice(0,10),378,y,{size:34,align:'left',weight:400,col:i?C.ink:C.red}); txt(`낙서 ${r.n}`,780,y,{size:34,align:'right',weight:400,col}); });
+  button(BTN.board,'🏆 전체 랭킹 보기',C.paper2,40); if(toLoad&&loaded<toLoad) txt(`그림 준비 중 ${loaded}/${toLoad}`,540,1900,{size:30,weight:400,col:C.gray}); drawSndBtn(); }
 const CONF_COL=['#F2C94C','#D9534F','#3F78B5','#3C8C5A','#E7913C'];
 const easeBack=x=>{ x=clamp(x,0,1); const c=1.9; return 1+(c+1)*Math.pow(x-1,3)+c*Math.pow(x-1,2); };
 function starPts(cx,cy,r){ const p=[]; for(let i=0;i<=10;i++){ const a=-Math.PI/2+i*Math.PI/5, rr=i%2?r*0.46:r; p.push([cx+Math.cos(a)*rr,cy+Math.sin(a)*rr]); } return p; }
