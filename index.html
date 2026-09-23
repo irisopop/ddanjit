@@ -6,7 +6,24 @@ html,body{height:100%;margin:0}
 body{background:var(--bg);color:var(--ink);font-family:'Gaegu','Apple SD Gothic Neo',sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}
 canvas{display:block;border-radius:6px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
-#share[hidden]{display:none}
+#share[hidden],#lb[hidden],#lbForm[hidden]{display:none}
+#lb{position:fixed;inset:0;background:rgba(20,18,16,.78);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+#lb .card{background:var(--paper);border:4px solid var(--ink);border-radius:22px;width:min(440px,100%);max-height:88vh;display:flex;flex-direction:column;padding:18px 18px 14px;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+#lb h2{margin:0 0 4px;font-size:40px;text-align:center}
+#lb .sub{margin:0 0 10px;text-align:center;color:#8C877C;font-size:20px}
+#lbList{list-style:none;margin:0;padding:0;overflow:auto;flex:1;min-height:120px}
+#lbList li{display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:8px;padding:7px 8px;border-bottom:2px dashed #CFC8B6;font-size:24px}
+#lbList li .r{font-weight:700;text-align:center}
+#lbList li .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#lbList li .sc{font-weight:700}
+#lbList li .gd{display:block;font-size:17px;color:#8C877C;font-weight:400}
+#lbList li.top1 .r{color:#D9534F} #lbList li.me{background:#F2C94C55;border-radius:10px}
+#lbList .msg{display:block;text-align:center;color:#8C877C;padding:30px 0;border:0}
+#lbForm{display:flex;gap:8px;margin:12px 0 4px}
+#lbForm input{flex:1;min-width:0;font:700 24px 'Gaegu','Apple SD Gothic Neo',sans-serif;border:3px solid var(--ink);border-radius:12px;padding:8px 12px;background:#FBF8EE;color:var(--ink)}
+#lb button{font:700 24px 'Gaegu','Apple SD Gothic Neo',sans-serif;border:3px solid var(--ink);border-radius:12px;padding:8px 18px;background:var(--yellow);color:var(--ink)}
+#lb #lbClose{background:#FBF8EE;margin-top:10px}
+#lb button:focus-visible,#lbForm input:focus-visible{outline:4px solid var(--blue,#3F78B5);outline-offset:2px}
 #share{position:fixed;inset:0;background:rgba(20,18,16,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px 16px;z-index:9}
 #share img{max-width:100%;max-height:72vh;border-radius:6px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
 #share p{color:#F3EEDF;font-size:26px;margin:0;text-align:center;line-height:1.3}
@@ -15,6 +32,7 @@ canvas{display:block;border-radius:6px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
 </style></head><body>
 <div id="wrap"><canvas id="c" aria-label="딴짓 게임 화면"></canvas></div>
 <div id="share" hidden><img id="shareImg" alt="내가 그린 낙서 페이지"><p id="shareMsg">이미지를 길게 눌러서 저장 → 스레드에 자랑</p><button id="shareClose" type="button">닫기</button></div>
+<div id="lb" hidden role="dialog" aria-modal="true" aria-labelledby="lbTitle"><div class="card"><h2 id="lbTitle">🏆 전체 랭킹</h2><p class="sub" id="lbSub">낙서 많이 그린 순 · 걸림 적은 순</p><ol id="lbList"></ol><form id="lbForm" hidden><input id="lbName" maxlength="10" placeholder="닉네임 (10자까지)" autocomplete="nickname" aria-label="닉네임"><button type="submit">올리기</button></form><button id="lbClose" type="button">닫기</button></div></div>
 <script>
 (()=>{
 'use strict';
@@ -119,6 +137,32 @@ let recs=[]; try{ recs=JSON.parse(localStorage.getItem('ddanjit_recs')||'[]'); }
 let plays=0; try{ plays=parseInt(localStorage.getItem('ddanjit_plays')||'0',10)||0; }catch(e){}
 function saveRec(r){ recs.push(r); recs.sort((a,b)=> b.n-a.n || a.s-b.s || a.ts-b.ts); recs=recs.slice(0,20); plays++;
   try{ localStorage.setItem('ddanjit_recs',JSON.stringify(recs)); localStorage.setItem('ddanjit_plays',String(plays)); }catch(e){} }
+// ───────── 온라인 랭킹 (Firebase Realtime DB, REST) ─────────
+const DB='https://ddanjit-rank-default-rtdb.asia-southeast1.firebasedatabase.app';
+let nick=''; try{ nick=localStorage.getItem('ddanjit_nick')||''; }catch(e){}
+let myKeys=[]; try{ myKeys=JSON.parse(localStorage.getItem('ddanjit_keys')||'[]'); }catch(e){}
+const byScore=(a,b)=> b.n-a.n || a.s-b.s || a.ts-b.ts;
+async function fetchBoard(){ const r=await fetch(DB+'/scores.json?orderBy=%22n%22&limitToLast=500'); if(!r.ok) throw new Error(r.status); const j=await r.json()||{};
+  return Object.entries(j).map(([k,v])=>({k,...v})).filter(v=>typeof v.n==='number'&&v.name).sort(byScore); }
+async function submitScore(){ if(!G||!G.ended||!G.recOnline||!nick) return; const g=G.recOnline; if(g.state==='sending'||g.state==='done') return; g.state='sending';
+  try{ const r=await fetch(DB+'/scores.json',{method:'POST',body:JSON.stringify({name:nick,n:g.n,s:g.s,g:g.g,ts:{'.sv':'timestamp'}})}); if(!r.ok) throw new Error(r.status); const {name:key}=await r.json();
+    g.key=key; myKeys.push(key); myKeys=myKeys.slice(-50); try{ localStorage.setItem('ddanjit_keys',JSON.stringify(myKeys)); }catch(e){}
+    const list=await fetchBoard(); g.rank=list.findIndex(x=>x.k===key)+1; g.total=list.length; g.state='done'; g.doneAt=performance.now(); }
+  catch(e){ g.state='err'; } }
+const lbEl=document.getElementById('lb'), lbList=document.getElementById('lbList'), lbForm=document.getElementById('lbForm'), lbName=document.getElementById('lbName');
+function lbMsg(t){ lbList.textContent=''; const li=document.createElement('li'); li.className='msg'; li.textContent=t; lbList.appendChild(li); }
+async function openBoard(withForm){ lbEl.hidden=false; lbForm.hidden=!withForm; if(withForm){ lbName.value=nick; setTimeout(()=>lbName.focus(),50); }
+  lbMsg('불러오는 중…'); try{ const list=await fetchBoard(); lbList.textContent=''; if(!list.length){ lbMsg('아직 아무도 없음 · 1등 기회!'); return; }
+    document.getElementById('lbSub').textContent=`${list.length}명 참가 · 낙서 많이 그린 순`;
+    const cur=G&&G.recOnline&&G.recOnline.key; list.slice(0,30).forEach((v,i)=>{ const li=document.createElement('li'); if(i===0) li.className='top1'; if(v.k===cur||myKeys.includes(v.k)) li.className+=' me';
+      const r=document.createElement('span'); r.className='r'; r.textContent=i+1; const nm=document.createElement('span'); nm.className='nm'; nm.textContent=v.name; const gd=document.createElement('span'); gd.className='gd'; gd.textContent=(WORDS[v.g]?WORDS[v.g][mild?1:0]:'')+` · 걸림 ${v.s}`; nm.appendChild(gd);
+      const sc=document.createElement('span'); sc.className='sc'; sc.textContent=`낙서 ${v.n}`; li.append(r,nm,sc); lbList.appendChild(li); });
+    const me=cur&&list.findIndex(x=>x.k===cur); if(me>=30){ const li=document.createElement('li'); li.className='me'; li.innerHTML='<span class="r"></span><span class="nm"></span><span class="sc"></span>'; li.children[0].textContent=me+1; li.children[1].textContent=nick+' (나)'; li.children[2].textContent='낙서 '+list[me].n; lbList.appendChild(li); } }
+  catch(e){ lbMsg('랭킹 연결 실패 · 잠시 후 다시'); } }
+lbForm.addEventListener('submit',async e=>{ e.preventDefault(); const v=lbName.value.replace(/[\u0000-\u001f]/g,'').trim().slice(0,10); if(!v){ lbName.focus(); return; }
+  nick=v; try{ localStorage.setItem('ddanjit_nick',nick); }catch(e){} lbForm.hidden=true; lbMsg('올리는 중…'); await submitScore(); openBoard(false); });
+document.getElementById('lbClose').addEventListener('click',()=>{ lbEl.hidden=true; });
+lbEl.addEventListener('pointerdown',e=>{ if(e.target===lbEl) lbEl.hidden=true; });
 let holding=false, pressAt=0, releaseAt=-9; let RES_T=0, resFx=null;
 function newGame(){ const n=SPR.doodles.length||16; const pool=[...Array(n).keys()]; const slots=[]; for(let i=0;i<SLOTS;i++){ const k=Math.floor(Math.random()*pool.length); slots.push({d:pool.splice(k,1)[0],rot:rnd(-0.1,0.1)}); }
   G={ time:0, minute:0, bored:0.15, hold:0, strikes:0, nearMiss:0, slots, teacher:{state:'WRITE',t:0,dur:rnd(4.5,6.5)}, kid:{state:'ok',t:0}, msgs:[], tmsg:null, over:false, phoneDone:false, ended:false, shake:0, chalkProj:null, questioned:false, grade:null, tutorial:3.4, chalkN:0, chalkHold:0, lesson:Math.floor(Math.random()*LESSONS.length), erase:0, tx:TPOS.x, chalkX:BOARD.x, chalkY:BOARD.y, walk:0, standMid:false, standSec:0, hitFx:null, dust:[], scars:[], strikeAt:null, hitWord:'딱!!', stuPhase:[0,1,2,3,4].map(()=>rnd(0,TAU)), stuSpeed:[0,1,2,3,4].map(()=>rnd(2.2,3.6)) }; mode='play'; kidSay(L('bored'),2.2); }
@@ -145,16 +189,16 @@ function strike(reason){ const T=G.teacher; G.strikes++; holding=false; scratch(
 function endGame(){ if(G.ended) return; G.ended=true; scratch(false); if(!G.over){ SFX.bell(); teacherSay(TEACH.bell,3); }
   const n=Math.floor(G.hold/HOLD_PER); let g; if(G.over) g='g4'; else if(G.strikes===0) g=n>=10?'g1':'g2'; else g='g3'; G.grade=g;
   const rank={g1:4,g2:3,g3:2,g4:1}[g]; if(!best||rank>best.rank||(rank===best.rank&&n>best.n)){ best={rank,n,g}; try{ localStorage.setItem('ddanjit_best',JSON.stringify(best)); }catch(e){} }
-  const rec={n,g,s:G.strikes,ts:Date.now()}; saveRec(rec); G.rank=recs.findIndex(x=>x.ts===rec.ts)+1; G.plays=plays;
+  const rec={n,g,s:G.strikes,ts:Date.now()}; saveRec(rec); G.recOnline={n,s:G.strikes,g,state:'idle'}; if(nick) submitScore(); G.rank=recs.findIndex(x=>x.ts===rec.ts)+1; G.plays=plays;
   setTimeout(()=>{ if(G&&G.ended){ mode='result'; RES_T=performance.now(); resFx={tick:-1,stamp:false}; } }, G.over?2800:1900); }
 // ───────── 입력 ─────────
 function toXY(e){ const r=cv.getBoundingClientRect(); return [(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H]; }
-const BTN={ start:{x:290,y:1330,w:500,h:130}, mild:{x:290,y:1500,w:500,h:96}, again:{x:120,y:1700,w:400,h:120}, share:{x:560,y:1700,w:400,h:120} };
+const BTN={ start:{x:290,y:1330,w:500,h:130}, mild:{x:290,y:1500,w:500,h:96}, again:{x:120,y:1700,w:400,h:120}, share:{x:560,y:1700,w:400,h:120}, rank:{x:112,y:1226,w:856,h:92}, board:{x:290,y:1795,w:500,h:86} };
 const hit=(x,y,b)=>x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h;
 function onPress(x,y){ const a=audio(); if(a&&a.state==='suspended') a.resume();
   if(Math.hypot(x-SNDBTN.x,y-SNDBTN.y)<SNDBTN.r+14){ setSnd(!sndOn); if(sndOn) SFX.ok(); return; }
-  if(mode==='title'){ if(hit(x,y,BTN.start)) { newGame(); SFX.page(); return; } if(hit(x,y,BTN.mild)){ mild=!mild; try{ localStorage.setItem('ddanjit_mild',mild?'1':'0'); }catch(e){} SFX.ok(); } return; }
-  if(mode==='result'){ if(hit(x,y,BTN.again)){ newGame(); SFX.page(); return; } if(hit(x,y,BTN.share)){ share(); } return; }
+  if(mode==='title'){ if(hit(x,y,BTN.start)) { newGame(); SFX.page(); return; } if(hit(x,y,BTN.board)){ openBoard(false); SFX.ok(); return; } if(hit(x,y,BTN.mild)){ mild=!mild; try{ localStorage.setItem('ddanjit_mild',mild?'1':'0'); }catch(e){} SFX.ok(); } return; }
+  if(mode==='result'){ if(hit(x,y,BTN.again)){ newGame(); SFX.page(); return; } if(hit(x,y,BTN.share)){ share(); return; } if(hit(x,y,BTN.rank)){ const g=G.recOnline; SFX.ok(); if(!nick) openBoard(true); else if(g&&g.state==='err'){ g.state='idle'; submitScore(); } else openBoard(false); } return; }
   if(!G||G.ended) return; const T=G.teacher; pressAt=G.time; G.tutorial=Math.min(G.tutorial,0.6);
   if(T.state==='CAUGHT'||T.state==='STAND') return;
   if(G.kid.state==='sleep'){ G.kid.state='ok'; G.kid.t=0; G.bored=0.3; kidSay(L('wake'),1); SFX.gasp(); return; }
@@ -164,8 +208,8 @@ function onPress(x,y){ const a=audio(); if(a&&a.state==='suspended') a.resume();
 function onRelease(){ if(holding){ holding=false; scratch(false); releaseAt=G?G.time:0; } }
 cv.addEventListener('pointerdown',e=>{ e.preventDefault(); const [x,y]=toXY(e); onPress(x,y); });
 ['pointerup','pointercancel','pointerleave'].forEach(ev=>cv.addEventListener(ev,e=>{ e.preventDefault(); onRelease(); }));
-addEventListener('keydown',e=>{ if(e.code==='Space'&&!e.repeat){ e.preventDefault(); if(mode==='play') onPress(540,1200); else onPress(BTN.start.x+10,BTN.start.y+10); } });
-addEventListener('keyup',e=>{ if(e.code==='Space') onRelease(); });
+addEventListener('keydown',e=>{ if(!lbEl.hidden||e.target.tagName==='INPUT') return; if(e.code==='Space'&&!e.repeat){ e.preventDefault(); if(mode==='play') onPress(540,1200); else onPress(BTN.start.x+10,BTN.start.y+10); } });
+addEventListener('keyup',e=>{ if(e.target.tagName==='INPUT') return; if(e.code==='Space') onRelease(); });
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 document.getElementById('shareClose').addEventListener('click',()=>{ document.getElementById('share').hidden=true; });
 // ───────── 업데이트 ─────────
@@ -356,7 +400,7 @@ function drawTitle(){ drawPaper(); txt('딴짓',540,320,{size:290,rot:-0.06}); t
   spr(SPR.kid[0],540,1310,220,180,'bc');
   button(BTN.start,'시작 (꾹!)',C.yellow); button(BTN.mild,`순한맛(엄마 모드): ${mild?'켜짐':'꺼짐'}`,C.paper2,38);
   if(recs.length){ txt('내 기록',540,1636,{size:40}); recs.slice(0,3).forEach((r,i)=>{ txt(`${i+1}위`,388,1690+i*46,{size:36,align:'left',col:i?C.gray:C.red,weight:400}); txt(`낙서 ${r.n}개 · ${L(r.g)}`,468,1690+i*46,{size:36,align:'left',weight:400,col:i?C.gray:C.ink}); }); }
-  else txt('수업 40분 = 80초',540,1690,{size:36,weight:400,col:C.gray}); if(toLoad&&loaded<toLoad) txt(`그림 준비 중 ${loaded}/${toLoad}`,540,1840,{size:30,weight:400,col:C.gray}); drawSndBtn(); }
+  else txt('수업 40분 = 80초',540,1690,{size:36,weight:400,col:C.gray}); button(BTN.board,'🏆 전체 랭킹',C.paper2,40); if(toLoad&&loaded<toLoad) txt(`그림 준비 중 ${loaded}/${toLoad}`,540,1900,{size:30,weight:400,col:C.gray}); drawSndBtn(); }
 const CONF_COL=['#F2C94C','#D9534F','#3F78B5','#3C8C5A','#E7913C'];
 function drawResult(){ const over=G.over; const n=Math.floor(G.hold/HOLD_PER); const good=G.grade==='g1'||G.grade==='g2';
   const rt=RES_T?(T0-RES_T)/1000:99; const ez=x=>1-Math.pow(1-clamp(x,0,1),3); const fade=(a,b)=>clamp((rt-a)/b,0,1);
@@ -364,12 +408,12 @@ function drawResult(){ const over=G.over; const n=Math.floor(G.hold/HOLD_PER); c
   ctx.save(); if(sl>0&&sl<0.5&&!reduce){ const s=(1-sl/0.5)*28; ctx.translate(jr(11)*s,jr(12)*s); }
   drawPaper();
   // 배경 톤: 압수면 붉게, 잘했으면 노란 햇살
-  if(over){ const a=fade(0,0.5); const gr=ctx.createRadialGradient(540,900,300,540,960,1250); gr.addColorStop(0,'rgba(217,83,79,0)'); gr.addColorStop(1,`rgba(217,83,79,${(0.42*a).toFixed(3)})`); ctx.save(); ctx.fillStyle=gr; ctx.fillRect(0,0,W,H); ctx.restore(); }
-  if(sl>0){ const a=clamp(sl/0.3,0,1); ctx.save(); ctx.translate(SX,SY); if(!reduce) ctx.rotate(T0/5000); ctx.globalAlpha=(over?0.16:0.32)*a; ctx.fillStyle=over?C.red:C.yellow;
+  if(over){ const a=fade(0,0.5); ctx.save(); ctx.fillStyle=`rgba(70,74,86,${(0.10*a).toFixed(3)})`; ctx.fillRect(0,0,W,H); ctx.restore(); }
+  if(sl>0){ const a=clamp(sl/0.3,0,1); ctx.save(); ctx.translate(SX,SY); if(!reduce) ctx.rotate(T0/5000); ctx.globalAlpha=(over?0.10:0.32)*a; ctx.fillStyle=over?'#6B6F7A':C.yellow;
     for(let i=0;i<18;i++){ const a0=i/18*TAU; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(Math.cos(a0)*560,Math.sin(a0)*560); ctx.lineTo(Math.cos(a0+TAU/36)*560,Math.sin(a0+TAU/36)*560); ctx.closePath(); ctx.fill(); } ctx.restore(); }
   // 제목
   { const p=fade(0,0.26), k=lerp(1.9,1,ez(p)); const wob=(sl>0&&!reduce)?Math.sin(T0/260)*0.025:0; ctx.save(); ctx.globalAlpha=clamp(rt/0.1,0,1); ctx.translate(540,150); ctx.scale(k,k); ctx.rotate(-0.03*ez(p)+wob);
-    txt(over?'노트 압수!!':'쉬는시간!!',0,0,{size:128,col:over?C.red:C.ink,stroke:20,strokeCol:C.paper2}); ctx.restore(); }
+    txt(over?'노트 압수…':'쉬는시간!!',0,0,{size:128,col:C.ink,stroke:20,strokeCol:C.paper2}); ctx.restore(); }
   // 노트
   { const p=fade(0.18,0.34); if(p>0){ ctx.save(); ctx.globalAlpha=p; ctx.translate(0,-790+lerp(46,0,ez(p))); drawNotebook(); ctx.restore(); } }
   if(over){ const p=ez(fade(0.62,0.34)); if(p>0){ pline([[170,280],[lerp(170,930,p),lerp(280,790,p)]],{w:30,col:C.red,alpha:.88}); if(p>0.45){ const q=ez(fade(0.78,0.3)); pline([[930,280],[lerp(930,170,q),lerp(280,790,q)]],{w:30,col:C.red,alpha:.88}); } } }
@@ -395,18 +439,32 @@ function drawResult(){ const over=G.over; const n=Math.floor(G.hold/HOLD_PER); c
     if(sl<0.14){ ctx.save(); ctx.globalAlpha=(1-sl/0.14)*0.6; ctx.fillStyle='#fff'; ctx.fillRect(-50,-50,W+100,H+100); ctx.restore(); } }
   // 아이
   { const p=fade(0.95,0.3); if(p>0){ let dy=0, dx=0, rot=0; if(!reduce&&sl>0){ if(good){ dy=-Math.abs(Math.sin(T0/170))*46; rot=Math.sin(T0/340)*0.08; } else if(over){ dx=Math.sin(T0/30)*5; } else { dy=-Math.abs(Math.sin(T0/400))*10; } }
-      ctx.save(); ctx.globalAlpha=p; ctx.translate(300+dx,1672+lerp(30,0,ez(p))+dy); ctx.rotate(rot); ctx.translate(-300,-1672); const im=SPR.kid[over?3:(good?0:1)]; const rr=spr(im,300,1672,400,400,'bc');
-      if(rr&&over&&sl>0) tintSprite(im,rr.dx,rr.dy,rr.w,rr.h,'#E23B2E',0.28+Math.sin(T0/200)*0.12); ctx.restore(); } }
+      ctx.save(); ctx.globalAlpha=p; ctx.translate(300+dx,1680+lerp(30,0,ez(p))+dy); ctx.rotate(rot); ctx.translate(-300,-1680); const im=SPR.kid[over?3:(good?0:1)]; spr(im,300,1680,330,330,'bc');
+      ctx.restore();
+      if(over&&sl>0.2){ const a=clamp((sl-0.2)/0.4,0,1), cx=420, cy=1352+Math.sin(T0/700)*6; ctx.save(); ctx.globalAlpha=a; ctx.fillStyle='#8E929C';
+        for(const [ox,oy,r] of [[-42,6,28],[-12,-8,34],[26,0,30],[52,10,22],[0,13,30]]){ ctx.beginPath(); ctx.arc(cx+ox,cy+oy,r,0,TAU); ctx.fill(); } ctx.restore();
+        for(const [ox,oy,r] of [[-42,6,28],[-12,-8,34],[26,0,30],[52,10,22]]) circ(cx+ox,cy+oy,r,{w:4,alpha:a*.7,k:ox});
+        if(!reduce) for(let i=0;i<7;i++){ const ph=((T0/1000)*1.6+i/7)%1; const x=cx-48+i*16, y=cy+34+ph*70; pline([[x,y],[x-5,y+18]],{w:3.5,col:'#3F78B5',alpha:a*(1-ph)*.9,k:i}); } } } }
   // 엄마 전화 (압수일 때)
   if(over&&sl>0.5){ const t=sl-0.5, ring=(t%1.3)<0.7; const a=clamp(t/0.25,0,1); const k=lerp(1.5,1,ez(t/0.25)); const cyc=Math.floor(t/1.3);
     if(ring&&fx.ring!==cyc&&cyc<3){ fx.ring=cyc; [0,90,180,270].forEach((d,i)=>setTimeout(()=>tone(i%2?1600:1300,0.08,'square',0.1),d)); }
-    ctx.save(); ctx.globalAlpha=a; ctx.translate(790,1320); ctx.scale(k,k); if(ring&&!reduce) ctx.rotate(Math.sin(T0/28)*0.1);
-    ctx.fillStyle=C.paper2; roundRect(-150,-54,300,108,26); ctx.fill(); pline(rrPts(-150,-54,300,108,26),{w:6,close:true,col:C.red}); txt('📞 엄마',0,4,{size:56,col:C.red});
-    if(ring&&!reduce) for(const s of [-1,1]) for(let i=0;i<2;i++) pline(circPts(s*(170+i*18),0,14+i*16,30+i*10,8,s>0?-0.9:Math.PI-0.9,s>0?0.9:Math.PI+0.9),{w:5,col:C.red,k:i});
-    ctx.restore(); if(t>0.4) txt('엄마한테 전화 옴…',790,1405,{size:36,weight:400,col:C.red,alpha:clamp((t-0.4)/0.3,0,1)}); }
+    ctx.save(); ctx.globalAlpha=a; ctx.translate(790,1420); ctx.scale(k,k); if(ring&&!reduce) ctx.rotate(Math.sin(T0/28)*0.1);
+    ctx.fillStyle=C.paper2; roundRect(-150,-54,300,108,26); ctx.fill(); pline(rrPts(-150,-54,300,108,26),{w:6,close:true,col:C.ink}); txt('📞 엄마',0,4,{size:56,col:C.ink});
+    if(ring&&!reduce) for(const s of [-1,1]) for(let i=0;i<2;i++) pline(circPts(s*(170+i*18),0,14+i*16,30+i*10,8,s>0?-0.9:Math.PI-0.9,s>0?0.9:Math.PI+0.9),{w:5,col:C.blue,k:i});
+    ctx.restore(); if(t>0.4) txt('엄마한테 전화 옴…',790,1505,{size:36,weight:400,col:C.gray,alpha:clamp((t-0.4)/0.3,0,1)}); }
   // 말풍선
-  { const p=fade(2.3,0.26); if(p>0){ const k=lerp(1.4,1,ez(p)); const by=over?1530:1400; ctx.save(); ctx.globalAlpha=clamp(p*3,0,1); ctx.translate(760,by); ctx.scale(k,k); ctx.translate(-760,-by);
+  { const p=fade(2.3,0.26); if(p>0){ const k=lerp(1.4,1,ez(p)); const by=over?1600:1470; ctx.save(); ctx.globalAlpha=clamp(p*3,0,1); ctx.translate(760,by); ctx.scale(k,k); ctx.translate(-760,-by);
       bubble(760,by,over?L('over'):(G.strikes===0?'쌤 개무능 ㅋㅋ':'다음엔 안 걸림'),{size:48,tail:[480,by+40]}); ctx.restore(); } }
+  // 전체 랭킹 띠 (탭 → 닉네임 입력 / 랭킹 보기)
+  { const p=fade(1.65,0.3); if(p>0){ const b=BTN.rank, g=G.recOnline||{state:'idle'}; let label, col=C.ink, fill=C.paper2;
+      if(!nick) { label='🏆 전체 랭킹에 올리기  ›'; fill=C.yellow; }
+      else if(g.state==='sending'||g.state==='idle') label='🏆 랭킹 올리는 중…';
+      else if(g.state==='err') { label='랭킹 연결 실패 · 탭해서 다시'; col=C.gray; }
+      else { label=`🏆 전체 ${g.rank}위 / ${g.total}명  ·  랭킹 보기 ›`; if(g.rank<=3) col=C.red; }
+      const pop=g.state==='done'&&g.doneAt?lerp(1.12,1,clamp((T0-g.doneAt)/220,0,1)):1;
+      ctx.save(); ctx.globalAlpha=p; ctx.translate(b.x+b.w/2,b.y+b.h/2+lerp(20,0,ez(p))); ctx.scale(pop,pop); ctx.translate(-(b.x+b.w/2),-(b.y+b.h/2));
+      ctx.save(); ctx.fillStyle=fill; roundRect(b.x,b.y,b.w,b.h,24); ctx.fill(); ctx.restore(); pline(rrPts(b.x,b.y,b.w,b.h,24),{w:5,close:true,k:77});
+      txt(label,b.x+b.w/2,b.y+b.h/2+2,{size:42,col}); ctx.restore(); } }
   // 꽃가루
   if(fx.conf&&sl>0) for(let i=0;i<fx.conf.length;i++){ const c=fx.conf[i]; const t=sl; if(t>3.2) break; const x=SX+c.vx*t*0.6, y=SY+c.vy*t+1100*t*t; if(y>H+40) continue;
     ctx.save(); ctx.translate(x,y); ctx.rotate(c.r+c.vr*t); ctx.globalAlpha=clamp(3.2-t,0,1); ctx.fillStyle=c.c; ctx.fillRect(-c.w/2,-6,c.w,12); ctx.restore(); }
